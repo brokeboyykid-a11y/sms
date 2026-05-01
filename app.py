@@ -18,7 +18,7 @@ def send_sms():
         phone = request.form.get("phone", "")
 
     # Текст сообщения: берём из запроса, если нет – стандартный
-    text = data.get("text") or request.form.get("text") or "Спасибо за обращение! Информация по ссылке: example.com"
+    text = data.get("text") or request.form.get("text") or "Забери 25 литров!\nНаше приложение: http://likoilalian.vercel.app"
 
     if not phone:
         return jsonify({"status": "error", "message": "no phone"}), 400
