@@ -1,29 +1,46 @@
 from flask import Flask, request, jsonify
+import logging
 import requests
 
 app = Flask(__name__)
 
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+
 P1SMS_API_KEY = "C0okWjuQHfX7JLHB3WUUZFOGL7ymzAAP1mQodUZo5rmEZtocWOgNOlVJm1PD"
 
-@app.route('/sms', methods=['POST'])
+@app.route('/sms', methods=['GET', 'POST'])
 def send_sms():
-    # Логируем входящие данные для отладки (потом можно убрать)
-    data = request.get_json(silent=True) or {}
-    print("Входящий запрос от Zvonok:", data)
+    # Логирование всех входящих данных
+    app.logger.info("Входящий запрос от Zvonok:")
+    app.logger.info("Метод: %s", request.method)
+    app.logger.info("Заголовки: %s", dict(request.headers))
+    app.logger.info("GET параметры: %s", request.args.to_dict())
 
-    # Пытаемся получить номер телефона – Zvonok обычно шлёт "phone"
-    phone = data.get("phone", "")
-    # Если номера нет в JSON, возможно, он в form-параметрах
+    phone = None
+    text = "Забери 25 литров! Наше приложение: http://likoilalian.vercel.app"
+
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        app.logger.info("JSON: %s", data)
+        phone = data.get("phone") or data.get("ct_phone")
+        text = data.get("text") or text
+    else:
+        phone = request.args.get('phone') or request.args.get('ct_phone')
+        text = request.args.get('text', text)
+
     if not phone:
-        phone = request.form.get("phone", "")
-
-    # Текст сообщения: берём из запроса, если нет – стандартный
-    text = data.get("text") or request.form.get("text") or "Забери 25 литров!\nНаше приложение: http://likoilalian.vercel.app"
+        # Ищем в любых полях
+        for key, value in (request.args if request.method == 'GET' else (request.get_json(silent=True) or {})).items():
+            if 'phone' in key.lower() and value:
+                phone = value
+                break
 
     if not phone:
+        app.logger.error("Номер телефона не найден")
         return jsonify({"status": "error", "message": "no phone"}), 400
 
-    # Очистка номера – оставляем только цифры
+    # Очистка номера
     phone = ''.join(filter(str.isdigit, phone))
     if len(phone) == 10 and phone.startswith('9'):
         phone = '7' + phone
@@ -32,30 +49,26 @@ def send_sms():
     elif len(phone) == 11 and phone.startswith('7'):
         pass
     else:
+        app.logger.error("Неверный формат номера: %s", phone)
         return jsonify({"status": "error", "message": "invalid phone format"}), 400
 
     # Отправка через P1sms
     url = "https://admin.p1sms.ru/apiSms/create"
     payload = {
         "apiKey": P1SMS_API_KEY,
-        "sms": [
-            {
-                "channel": "digit",
-                "phone": phone,
-                "text": text
-            }
-        ]
+        "sms": [{
+            "channel": "digit",
+            "phone": phone,
+            "text": text
+        }]
     }
 
     try:
         resp = requests.post(url, json=payload, timeout=10)
-        print("P1sms ответ:", resp.text)
-        return jsonify({
-            "status": "ok",
-            "p1sms_response": resp.json()
-        })
+        app.logger.info("P1sms ответ: %s", resp.text)
+        return jsonify({"status": "ok", "p1sms_response": resp.json()})
     except Exception as e:
-        print("Ошибка отправки SMS:", str(e))
+        app.logger.error("Ошибка отправки SMS: %s", str(e))
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
